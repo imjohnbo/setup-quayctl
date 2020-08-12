@@ -1,21 +1,38 @@
 const core = require('@actions/core');
-const wait = require('./wait');
+const cache = require('@actions/tool-cache');
+const semver = require('semver');
+const fs = require('fs').promises;
 
+const toolName = 'quayctl';
 
-// most @actions toolkit packages have async methods
-async function run() {
-  try {
-    const ms = core.getInput('milliseconds');
-    core.info(`Waiting ${ms} milliseconds ...`);
+async function exec() {
+    try {
+        let toolPath;
+        const version = core.getInput('version');
 
-    core.debug((new Date()).toTimeString()); // debug is only output if you set the secret `ACTIONS_RUNNER_DEBUG` to true
-    await wait(parseInt(ms));
-    core.info((new Date()).toTimeString());
+        // is this version already in our cache
+        toolPath = cache.find(toolName, version);
 
-    core.setOutput('time', new Date().toTimeString());
-  } catch (error) {
-    core.setFailed(error.message);
-  }
+        if (!toolPath) {
+            toolPath = await downloadCLI(version);
+        }
+
+        // add tool to path for this and future actions to use
+        core.addPath(toolPath);
+    } catch (error) {
+        core.setFailed(error.message);
+    }
 }
 
-run();
+async function downloadCLI(version) {
+    const cleanVersion = semver.clean(version) || '';
+    const url = `https://github.com/quay/quayctl/releases/download/v${cleanVersion}/quayctl-linux-x64`;
+    const downloadURL = encodeURI(url);
+    const downloadedTool = await cache.downloadTool(downloadURL);
+    const permissions = 0o755;
+
+    await fs.chmod(downloadedTool, permissions);
+    return await cache.cacheFile(downloadedTool, toolName, toolName, version);
+}
+
+exec();
